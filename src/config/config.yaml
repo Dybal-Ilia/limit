@@ -1,0 +1,37 @@
+retriever:
+  top_k: 500
+  rerank_k: 200
+  embedding_dim: 768
+  # Fusion configuration for HybridRetriever
+  fusion: "weighted"   # options: 'weighted', 'rrf'
+  normalizer: "minmax" # options: 'minmax', 'zscore', 'rank'
+  rrf_k: 60
+  # Optional weights per retriever [bm25, splade, dense, (late_interaction if enabled)]
+  # weights: [1.0, 1.0, 1.0]
+
+ablation:
+  enabled: true
+  debug: true
+  mode: "truncate"  # options: 'truncate' or 'pad'
+  dims: [32, 64, 128, 256, 512, 768]
+  output: "runs/ablation_results.csv"
+
+paths:
+  corpus: "src/data/corpus-small.jsonl"
+  queries: "src/data/queries-small.jsonl"
+  qrels: "src/data/qrels-small.jsonl"
+
+models:
+  bm25: "bm25"
+  splade: "naver/splade-cocondenser-ensembledistil"
+  dense: "sentence-transformers/all-mpnet-base-v2"
+  reranker: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  # Optional multi-vector retriever (ColBERT-style)
+  # late_interaction: "sentence-transformers/all-MiniLM-L6-v2"
+
+query_planning:
+  enabled: True
+  model: "sshleifer/tiny-gpt2"
+  max_new_tokens: 64
+  merge: "union"   # 'union' or 'rrf'
+  rrf_k: 60
