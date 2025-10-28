@@ -2,6 +2,24 @@ from transformers import AutoTokenizer, AutoModelForMaskedLM
 import torch
 from src.models.base import BaseModel
 
+# GOOGLE'S LIMIT PAPER UNDERSTANDING:
+# SPLADE uses learned sparse representations - vocabulary-sized vectors with mostly
+# zero values. While still technically single-vector embeddings, the high dimensionality
+# (30k+ for vocabulary size) and sparsity pattern provide different failure modes than
+# dense embeddings.
+#
+# THEORETICAL CONTEXT: SPLADE learns which vocabulary terms are important for retrieval
+# through a learned sparse weighting. This provides a middle ground between keyword
+# matching (BM25) and dense semantic similarity (sentence transformers).
+#
+# COMPLEMENTARY ROLE: In the hybrid system, SPLADE captures learned semantic importance
+# at the vocabulary level, providing signals that neither pure keyword matching nor
+# fixed-dimensional dense embeddings can capture effectively.
+#
+# LIMIT DATASET: SPLADE's ability to weight vocabulary terms helps with queries that
+# need semantic understanding but also benefit from term-level precision, partially
+# mitigating the single-vector embedding limitations through very high dimensionality.
+
 class SPLADERetriever(BaseModel):
     def __init__(self, model_name):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
