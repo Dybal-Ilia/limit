@@ -170,6 +170,8 @@ class BaselineExperiment:
                     def make_wrapped(orig_fn, mode_val, d_val):
                         def wrapped(texts, *a, **kw):
                             vecs = orig_fn(texts, *a, **kw)
+                            if debug:
+                                logger.info(f"Wrapped encode called: mode={mode_val}, d={d_val}, input_len={len(texts) if hasattr(texts, '__len__') else '?'}")
                             try:
                                 import torch as _torch
                             except Exception:
@@ -335,8 +337,20 @@ class BaselineExperiment:
                         def wrapped_retrieve(query, corpus_arg, top_k_arg):
                             cls_name = retriever.__class__.__name__
                             try:
-                                # compute query vector using original encoder to avoid double-wrapping
-                                qvec = orig_enc([query]) if orig_enc is not None else None
+                                # CRITICAL: Use the wrapped/monkeypatched encode() method, not original
+                                # This ensures query vectors match document dimensionality (both truncated/padded)
+                                qvec = retriever.encode([query]) if hasattr(retriever, 'encode') else None
+                                
+                                # Debug: log shapes if debug mode enabled
+                                if debug and qvec is not None:
+                                    try:
+                                        q_shape = np.asarray(qvec).shape
+                                        d_shape = np.asarray(doc_vecs_local).shape
+                                        if hasattr(retriever, 'encode') and hasattr(retriever.encode, '_ablation_info'):
+                                            mode_val, d_val = retriever.encode._ablation_info
+                                            logger.info(f"Ablation {cls_name}: query_shape={q_shape}, doc_shape={d_shape}, target_dim={d_val}")
+                                    except Exception:
+                                        pass
                             except Exception:
                                 qvec = None
 
@@ -346,16 +360,30 @@ class BaselineExperiment:
                                     q_arr = np.asarray(qvec)
                                     if q_arr.ndim == 2:
                                         q_arr = q_arr[0]
-                                    sims = np.asarray(doc_vecs_local).dot(q_arr)
+                                    doc_arr = np.asarray(doc_vecs_local)
+                                    
+                                    # Validate dimensions match
+                                    if debug:
+                                        logger.info(f"Dense: About to compute similarity - q_shape={q_arr.shape}, doc_shape={doc_arr.shape}")
+                                    
+                                    if q_arr.shape[0] != doc_arr.shape[1]:
+                                        logger.warning(f"Dense: Dimension mismatch! q_dim={q_arr.shape[0]}, doc_dim={doc_arr.shape[1]} - falling back")
+                                        return orig_retr_fn(query, corpus_arg, top_k_arg)
+                                    
+                                    sims = doc_arr.dot(q_arr)
                                     top_ids = sims.argsort()[::-1][:top_k_arg]
                                     results = []
                                     for i in top_ids:
                                         doc = corpus_arg[i]
                                         doc_id = doc.get('id', i) if isinstance(doc, dict) else i
                                         results.append({'id': doc_id, 'score': float(sims[i])})
+                                    
+                                    if debug and len(results) > 0:
+                                        logger.info(f"Dense: Successfully computed {len(results)} results using {q_arr.shape[0]}-dim vectors")
                                     return results
-                                except Exception:
+                                except Exception as e:
                                     # fallback to original retrieve
+                                    logger.warning(f"Dense: Exception in wrapped retrieve: {e} - falling back")
                                     return orig_retr_fn(query, corpus_arg, top_k_arg)
 
                             # SPLADE scoring (assume torch tensors)
@@ -369,19 +397,42 @@ class BaselineExperiment:
                                         doc_t = doc_vecs_local
                                         if not isinstance(doc_t, _torch.Tensor):
                                             doc_t = _torch.tensor(np.asarray(doc_t))
-                                        # cosine similarity
-                                        sims = _torch.nn.functional.cosine_similarity(q_t.unsqueeze(0), doc_t)
+                                        
+                                        # Validate dimensions
+                                        if debug:
+                                            logger.info(f"SPLADE: About to compute similarity - q_shape={q_t.shape}, doc_shape={doc_t.shape}")
+                                        
+                                        if q_t.shape[-1] != doc_t.shape[-1]:
+                                            logger.warning(f"SPLADE: Dimension mismatch! q_dim={q_t.shape[-1]}, doc_dim={doc_t.shape[-1]} - falling back")
+                                            return orig_retr_fn(query, corpus_arg, top_k_arg)
+                                        
+                                        # Flatten to 1D if needed
+                                        if q_t.ndim > 1:
+                                            q_t = q_t.squeeze(0)  # (1, dim) -> (dim,)
+                                        if doc_t.ndim == 1:
+                                            doc_t = doc_t.unsqueeze(0)  # (dim,) -> (1, dim) if single doc
+                                        
+                                        # Compute cosine similarity: (dim,) vs (N, dim)
+                                        # Normalize vectors
+                                        q_norm = q_t / (_torch.norm(q_t) + 1e-8)
+                                        doc_norm = doc_t / (_torch.norm(doc_t, dim=1, keepdim=True) + 1e-8)
+                                        # Dot product for cosine similarity
+                                        sims = _torch.matmul(doc_norm, q_norm)
                                         sims = sims.detach().cpu().numpy()
-                                        topk = min(top_k_arg, sims.shape[0])
-                                        top_idxs = sims.argsort()[::-1][:topk]
+                                        topk = min(top_k_arg, len(sims))
+                                        top_idxs = np.argsort(sims)[::-1][:topk]
                                         results = []
                                         for idx in top_idxs:
                                             i = int(idx)
                                             doc = corpus_arg[i]
                                             doc_id = doc.get('id', i) if isinstance(doc, dict) else i
                                             results.append({'id': doc_id, 'score': float(sims[i])})
+                                        
+                                        if debug and len(results) > 0:
+                                            logger.info(f"SPLADE: Successfully computed {len(results)} results using {q_t.shape[-1]}-dim vectors")
                                         return results
-                                except Exception:
+                                except Exception as e:
+                                    logger.warning(f"SPLADE: Exception in wrapped retrieve: {e} - falling back")
                                     return orig_retr_fn(query, corpus_arg, top_k_arg)
 
                             # Default: fallback to original retrieve
