@@ -13,7 +13,7 @@ ablation:
   enabled: true
   debug: true
   mode: "truncate"  # options: 'truncate' or 'pad'
-  dims: [32, 64, 128, 256, 512, 768]
+  dims: [32, 128, 768]  # Reduced for quick testing - expand to [32, 64, 128, 256, 512, 768] for full run
   output: "runs/ablation_results.csv"
 
 paths:
