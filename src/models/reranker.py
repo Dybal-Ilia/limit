@@ -1,6 +1,24 @@
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
 
+# GOOGLE'S LIMIT PAPER UNDERSTANDING:
+# Cross-encoder rerankers fundamentally differ from single-vector embeddings (bi-encoders).
+# Instead of encoding query and document separately, they jointly encode the pair,
+# allowing rich interaction between query and document tokens.
+#
+# THEORETICAL CONTEXT: While Google's LIMIT paper proves single-vector embeddings have
+# limitations, cross-encoders bypass this by not using separate embeddings at all.
+# They use the full transformer attention mechanism over concatenated query+document.
+#
+# WHY IT HELPS: Cross-encoders can capture fine-grained relevance signals that single
+# vectors cannot represent. However, they're computationally expensive (O(n) forward
+# passes for n documents), so we use two-stage retrieval: fast single-vector candidate
+# generation, then precise cross-encoder reranking on top-k.
+#
+# PIPELINE ROLE: We retrieve top-k=500 candidates with hybrid fusion (BM25+SPLADE+Dense),
+# then rerank the top rerank_k=200 with the cross-encoder for final precision. This
+# combines computational efficiency with theoretical expressiveness.
+
 class CrossEncoderReranker:
     def __init__(self, model_name, device: str | None = None, batch_size: int = 16):
         if device is None:
