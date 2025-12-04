@@ -31,7 +31,7 @@ models:
 
 query_planning:
   enabled: True
-  model: "sshleifer/tiny-gpt2"
+  model: "google/flan-t5-small"  # instruction-tuned model yields cleaner JSON outputs
   max_new_tokens: 64
   merge: "union"   # 'union' or 'rrf'
   rrf_k: 60
